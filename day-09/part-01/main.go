@@ -10,17 +10,17 @@ import (
 	"strings"
 )
 
-const FILENAME = "../sample-input.txt"
+const FILENAME = "../input.txt"
 
 type Node struct {
 	X int
 	Y int
 }
 
-type Distance struct {
-	Node1    *Node
-	Node2    *Node
-	Distance float64
+type Area struct {
+	Node1 *Node
+	Node2 *Node
+	Area  float64
 }
 
 func parseNodes() ([]Node, error) {
@@ -56,24 +56,24 @@ func parseNodes() ([]Node, error) {
 	return nodes, nil
 }
 
-func calculateDistances(nodes []Node) []Distance {
-	numberOfDistances := len(nodes) * (len(nodes) - 1) / 2
-	distances := make([]Distance, numberOfDistances)
+func calculateAreas(nodes []Node) []Area {
+	numberOfAreas := len(nodes) * (len(nodes) - 1) / 2
+	areas := make([]Area, numberOfAreas)
 	index := 0
 	var n1, n2 *Node
 	for i := 0; i < len(nodes)-1; i++ {
 		n1 = &nodes[i]
 		for j := i + 1; j < len(nodes); j++ {
 			n2 = &nodes[j]
-			distances[index] = Distance{
-				Node1:    n1,
-				Node2:    n2,
-				Distance: math.Sqrt(float64((n1.X-n2.X)*(n1.X-n2.X) + (n1.Y-n2.Y)*(n1.Y-n2.Y))),
+			areas[index] = Area{
+				Node1: n1,
+				Node2: n2,
+				Area:  math.Abs(float64(n1.X)-float64(n2.X)) * math.Abs(float64(n1.Y)-float64(n2.Y)),
 			}
 			index++
 		}
 	}
-	return distances
+	return areas
 }
 
 type Circuit []*Node
@@ -84,14 +84,17 @@ func main() {
 		println("there was an issue parsing the nodes. error:\n", err)
 		return
 	}
-	distances := calculateDistances(nodes)
-	slices.SortFunc(distances, func(d1, d2 Distance) int {
-		if d1.Distance < d2.Distance {
+	areas := calculateAreas(nodes)
+	largestArea := slices.MaxFunc(areas, func(d1, d2 Area) int {
+		if d1.Area > d2.Area {
 			return 1
-		} else if d1.Distance > d2.Distance {
+		} else if d1.Area < d2.Area {
 			return -1
 		}
 		return 0
 	})
-	print(nodes)
+
+	width := math.Abs(float64(largestArea.Node1.X)-float64(largestArea.Node2.X)) + 1
+	height := math.Abs(float64(largestArea.Node1.Y)-float64(largestArea.Node2.Y)) + 1
+	println("Answer:", int(width*height))
 }
