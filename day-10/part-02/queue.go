@@ -4,54 +4,65 @@ import (
 	"errors"
 )
 
-// Queue represents a generic FIFO data structure
-type Queue[T any] struct {
-	items []T
+type QueueNode[T any] struct {
+	value *T
+	cost  float64
 }
 
-// NewQueue creates and returns a new empty queue
-func NewQueue[T any]() *Queue[T] {
-	return &Queue[T]{
-		items: []T{},
+type CostQueue[T any] struct {
+	items []QueueNode[T]
+}
+
+func NewQueue[T any]() *CostQueue[T] {
+	return &CostQueue[T]{
+		items: []QueueNode[T]{},
 	}
 }
 
-// Enqueue adds an item to the back of the queue
-func (q *Queue[T]) Enqueue(item T) {
-	q.items = append(q.items, item)
+func (q *CostQueue[T]) Add(item *T, cost float64) {
+	q.items = append(q.items, QueueNode[T]{
+		cost:  cost,
+		value: item,
+	})
+	hippifyUp(q, len(q.items)-1)
 }
 
-// Dequeue removes and returns the front item from the queue
-func (q *Queue[T]) Dequeue() (T, error) {
-	var zero T
-	if q.IsEmpty() {
-		return zero, errors.New("queue is empty")
+func hippifyUp[T any](q *CostQueue[T], index int) {
+	if index == 0 || q.items[index].cost >= q.items[index/2].cost {
+		return
+	}
+	q.items[index], q.items[index/2] = q.items[index/2], q.items[index]
+	hippifyUp(q, index/2)
+}
+
+func (q *CostQueue[T]) Pop() (*T, error) {
+	if len(q.items) == 0 {
+		return nil, errors.New("queue is empty")
 	}
 	item := q.items[0]
-	q.items = q.items[1:]
-	return item, nil
+	q.items[0] = q.items[len(q.items)-1]
+	q.items = q.items[0 : len(q.items)-1]
+	hippifyDown(q, 0)
+	return item.value, nil
 }
 
-// Peek returns the front item without removing it
-func (q *Queue[T]) Peek() (T, error) {
-	var zero T
-	if q.IsEmpty() {
-		return zero, errors.New("queue is empty")
+func hippifyDown[T any](q *CostQueue[T], index int) {
+	if index*2+1 >= len(q.items) {
+		return
 	}
-	return q.items[0], nil
-}
-
-// IsEmpty returns true if the queue is empty
-func (q *Queue[T]) IsEmpty() bool {
-	return len(q.items) == 0
+	var smallerChildIdx int
+	if index*2+2 < len(q.items) && q.items[index*2+2].cost < q.items[index*2+1].cost {
+		smallerChildIdx = index*2 + 2
+	} else {
+		smallerChildIdx = index*2 + 1
+	}
+	if q.items[index].cost > q.items[smallerChildIdx].cost {
+		q.items[index], q.items[smallerChildIdx] = q.items[smallerChildIdx], q.items[index]
+		hippifyDown(q, smallerChildIdx)
+	}
 }
 
 // Size returns the number of items in the queue
-func (q *Queue[T]) Size() int {
+func (q *CostQueue[T]) Size() int {
 	return len(q.items)
-}
-
-// Clear removes all items from the queue
-func (q *Queue[T]) Clear() {
-	q.items = []T{}
 }
