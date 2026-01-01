@@ -3,32 +3,37 @@ package main
 import (
 	"bufio"
 	"errors"
-	"math"
+	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/lukpank/go-glpk/glpk"
 )
 
 const FILENAME = "../input.txt"
 
 type State []int
 
-type StateHash uint64
+func (state State) ToString() string {
+	str := "{"
+	for index, num := range state {
+		str += strconv.Itoa(num)
+		if index < len(state)-1 {
+			str += ","
+		}
+	}
+	str += "}"
+	return str
+}
 
 type Action []int
 
-type Record struct {
-	Steps       int
-	multipliers []int
-	State       *State
-}
-
 type Machine struct {
-	DesiredState    State
-	Actions         []Action
-	Queue           *CostQueue[Record]
-	ProcessedStates map[StateHash]*Record
+	DesiredState State
+	Actions      []Action
 }
 
 func parseInput() ([]Machine, error) {
@@ -85,126 +90,73 @@ func parseInput() ([]Machine, error) {
 			desiredState = append(desiredState, joltage)
 		}
 		machines = append(machines, Machine{
-			DesiredState:    desiredState,
-			Actions:         actions,
-			Queue:           NewQueue[Record](),
-			ProcessedStates: make(map[StateHash]*Record),
+			DesiredState: desiredState,
+			Actions:      actions,
 		})
 	}
 	return machines, nil
 }
 
-func (state State) ApplyAction(action Action, multiplier int) (State, error) {
-	newState := append(State{}, state...)
-	for _, button := range action {
-		newState[button] += multiplier
-	}
-	return newState, nil
-}
-
-func (machine Machine) CalculateHeuristic(steps int, newState *State) float64 {
-	maxDistanceToTarget := 0
-	minDistanceToTarget := 0
-	averageDistanceOfJoltages := 0.0
-	totalDistance := 0
-	for index, desiredJoltage := range machine.DesiredState {
-		distance := desiredJoltage - (*newState)[index]
-		averageDistanceOfJoltages += float64(distance) / float64(len(machine.DesiredState))
-		totalDistance += distance
-		if distance != 0 && distance > maxDistanceToTarget {
-			maxDistanceToTarget = distance
-		}
-		if distance != 0 && distance < minDistanceToTarget {
-			minDistanceToTarget = distance
-		}
-	}
-	// prefer states that their joltages on average have a closer distance to targets
-	// return float64(steps) + averageDistanceOfJoltages
-	// return float64(steps) + float64(minDistanceToTarget)
-	return float64(steps) + float64(totalDistance)
-	// return float64(steps)
-	// return float64(steps) + float64(maxDistanceToTarget)
-
-}
-
-func (machine Machine) Solve() (*Record, int, error) {
-	tries := 0
-	for machine.Queue.Size() > 0 && tries < 2_000_000 {
-		record, err := machine.Queue.Pop()
-		if err != nil {
-			return nil, 0, err
-		}
-		if record.State.Hash() == machine.DesiredState.Hash() {
-			return record, tries, nil
-		}
-		isActionInvalid := false
-		for index, newJoltage := range *record.State {
-			if newJoltage > machine.DesiredState[index] {
-				isActionInvalid = true
-				break
-			}
-		}
-		if isActionInvalid {
-			continue
-		}
-		if cachedRecord, exists := machine.ProcessedStates[record.State.Hash()]; exists {
-			if cachedRecord.Steps <= record.Steps {
-				continue
-			} else {
-				machine.ProcessedStates[record.State.Hash()] = record
-			}
-		}
-		for index, action := range machine.Actions {
-			minDistanceToTarget := math.MaxInt
-			for _, index := range action {
-				distance := machine.DesiredState[index] - (*record.State)[index]
-				if distance < minDistanceToTarget {
-					minDistanceToTarget = distance
-				}
-			}
-			for multiplier := minDistanceToTarget; multiplier >= 1; multiplier-- {
-				newState, err := record.State.ApplyAction(action, multiplier)
-				if err != nil {
-					return nil, 0, err
-				}
-				cost := machine.CalculateHeuristic(record.Steps+multiplier, &newState)
-				newMultipliers := append([]int{}, record.multipliers...)
-				newMultipliers[index] += multiplier
-				machine.Queue.Add(&Record{
-					Steps:       record.Steps + multiplier,
-					multipliers: newMultipliers,
-					State:       &newState,
-				}, cost)
-			}
-		}
-		machine.ProcessedStates[record.State.Hash()] = record
-		tries++
-	}
-	return nil, 0, errors.New("failed to find the solution.")
-}
-
 func main() {
 	machines, err := parseInput()
 	if err != nil {
-		println(err)
+		println("parsing failed! " + err.Error())
 		return
 	}
 	total := 0
-	for index, machine := range machines {
-		initialState := make(State, len(machine.DesiredState))
-		cost := machine.CalculateHeuristic(0, &initialState)
-		machine.Queue.Add(&Record{
-			State:       &initialState,
-			Steps:       0,
-			multipliers: make([]int, len(machine.Actions)),
-		}, cost)
-		answerRecord, tries, err := machine.Solve()
-		if err != nil {
-			println("failed to find the solution for the machine with desired state of index " + strconv.Itoa(index) + " error: " + err.Error())
-			continue
+	for _, machine := range machines {
+		lp := glpk.New()
+		defer lp.Delete()
+		lp.SetProbName("minimize sum")
+		lp.SetObjName(machine.DesiredState.ToString())
+		lp.SetObjDir(glpk.MIN)
+		lp.AddRows(len(machine.DesiredState))
+		for index, desiredJoltage := range machine.DesiredState {
+			lp.SetRowName(index+1, "c"+strconv.Itoa(index+1))
+			lp.SetRowBnds(index+1, glpk.FX, float64(desiredJoltage), float64(desiredJoltage))
 		}
-		println("found  the solution for the machine with desired state of", strconv.Itoa(index), " -> ", answerRecord.Steps, " in ", tries, "tries")
-		total += answerRecord.Steps
+		lp.AddCols(len(machine.Actions))
+		ind := make([]int32, len(machine.Actions)+1)
+		for index := range ind {
+			ind[index] = int32(index)
+		}
+		coefficients := make([][]float64, len(machine.DesiredState)+1)
+		for index := range coefficients {
+			coefficients[index] = make([]float64, len(machine.Actions)+1)
+		}
+		for index, action := range machine.Actions {
+			lp.SetColName(index+1, "x"+strconv.Itoa(index))
+			lp.SetColBnds(index+1, glpk.LO, 0, 0)
+			lp.SetColKind(index+1, glpk.IV)
+			lp.SetObjCoef(index+1, 1.0)
+			for _, affectedIndex := range action {
+				coefficients[affectedIndex+1][index+1] = 1
+			}
+		}
+		for index, row := range coefficients {
+			if index == 0 {
+				continue
+			}
+			lp.SetMatRow(index, ind, row)
+		}
+
+		iocp := glpk.NewIocp()
+		iocp.SetMsgLev(glpk.MSG_ERR) // only errors & warnings
+		iocp.SetPresolve(true)       // Enable presolving for efficiency
+		if err := lp.Intopt(iocp); err != nil {
+			log.Fatalf("ILP error: %v", err)
+		}
+
+		// Output results
+		fmt.Printf("Found the Answer for %s -> %g (", lp.ObjName(), lp.MipObjVal())
+		for i := 1; i <= len(machine.Actions); i++ {
+			fmt.Printf("%g", lp.MipColVal(i))
+			if i < len(machine.Actions) {
+				fmt.Print(",")
+			}
+		}
+		print(")\n")
+		total += int(lp.MipObjVal())
 	}
-	println("Total: ", total)
+	fmt.Println("Total: ", total)
 }
