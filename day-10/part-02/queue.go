@@ -28,11 +28,11 @@ func (q *CostQueue[T]) Add(item *T, cost float64) {
 }
 
 func hippifyUp[T any](q *CostQueue[T], index int) {
-	if index == 0 || q.items[index].cost >= q.items[index/2].cost {
+	if index == 0 || q.items[index].cost >= q.items[(index-1)/2].cost {
 		return
 	}
-	q.items[index], q.items[index/2] = q.items[index/2], q.items[index]
-	hippifyUp(q, index/2)
+	q.items[index], q.items[(index-1)/2] = q.items[(index-1)/2], q.items[index]
+	hippifyUp(q, (index-1)/2)
 }
 
 func (q *CostQueue[T]) Pop() (*T, error) {

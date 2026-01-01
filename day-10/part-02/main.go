@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -93,10 +94,10 @@ func parseInput() ([]Machine, error) {
 	return machines, nil
 }
 
-func (state State) ApplyAction(action Action) (State, error) {
+func (state State) ApplyAction(action Action, multiplier int) (State, error) {
 	newState := append(State{}, state...)
 	for _, button := range action {
-		newState[button]++
+		newState[button] += multiplier
 	}
 	return newState, nil
 }
@@ -118,9 +119,9 @@ func (machine Machine) CalculateHeuristic(steps int, newState *State) float64 {
 		}
 	}
 	// prefer states that their joltages on average have a closer distance to targets
-	return float64(steps) + averageDistanceOfJoltages
+	// return float64(steps) + averageDistanceOfJoltages
 	// return float64(steps) + float64(minDistanceToTarget)
-	// return float64(steps) + float64(totalDistance)
+	return float64(steps) + float64(totalDistance)
 	// return float64(steps)
 	// return float64(steps) + float64(maxDistanceToTarget)
 
@@ -128,7 +129,7 @@ func (machine Machine) CalculateHeuristic(steps int, newState *State) float64 {
 
 func (machine Machine) Solve() (*Record, int, error) {
 	tries := 0
-	for machine.Queue.Size() > 0 && tries < 1_000_000 {
+	for machine.Queue.Size() > 0 && tries < 2_000_000 {
 		record, err := machine.Queue.Pop()
 		if err != nil {
 			return nil, 0, err
@@ -154,18 +155,27 @@ func (machine Machine) Solve() (*Record, int, error) {
 			}
 		}
 		for index, action := range machine.Actions {
-			newState, err := record.State.ApplyAction(action)
-			if err != nil {
-				return nil, 0, err
+			minDistanceToTarget := math.MaxInt
+			for _, index := range action {
+				distance := machine.DesiredState[index] - (*record.State)[index]
+				if distance < minDistanceToTarget {
+					minDistanceToTarget = distance
+				}
 			}
-			cost := machine.CalculateHeuristic(record.Steps+1, &newState)
-			newMultipliers := append([]int{}, record.multipliers...)
-			newMultipliers[index]++
-			machine.Queue.Add(&Record{
-				Steps:       record.Steps + 1,
-				multipliers: newMultipliers,
-				State:       &newState,
-			}, cost)
+			for multiplier := minDistanceToTarget; multiplier >= 1; multiplier-- {
+				newState, err := record.State.ApplyAction(action, multiplier)
+				if err != nil {
+					return nil, 0, err
+				}
+				cost := machine.CalculateHeuristic(record.Steps+multiplier, &newState)
+				newMultipliers := append([]int{}, record.multipliers...)
+				newMultipliers[index] += multiplier
+				machine.Queue.Add(&Record{
+					Steps:       record.Steps + multiplier,
+					multipliers: newMultipliers,
+					State:       &newState,
+				}, cost)
+			}
 		}
 		machine.ProcessedStates[record.State.Hash()] = record
 		tries++
@@ -191,9 +201,9 @@ func main() {
 		answerRecord, tries, err := machine.Solve()
 		if err != nil {
 			println("failed to find the solution for the machine with desired state of index " + strconv.Itoa(index) + " error: " + err.Error())
-			return
+			continue
 		}
-		println("found  the solution for the machine with desired state of", machine.DesiredState, " -> ", answerRecord.Steps, " in ", tries, "tries")
+		println("found  the solution for the machine with desired state of", strconv.Itoa(index), " -> ", answerRecord.Steps, " in ", tries, "tries")
 		total += answerRecord.Steps
 	}
 	println("Total: ", total)
